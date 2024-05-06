@@ -1,0 +1,28 @@
+# Python build artifacts
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python virtual environments
+.env/
+.venv/
+
+# Default output directory
+output/
+
+# Ignore hidden files and folders
+.*
+# ...except for .gitignore and .gitkeep
+!.gitignore
+!.gitkeep
+
+# Visual Studio Code settings
+.vscode/
+
+# system files
+.DS_Store
+Thumbs.db
+
+# Potentially sensitive information
+auth_token.txt
