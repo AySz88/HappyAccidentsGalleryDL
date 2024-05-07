@@ -4,8 +4,8 @@ import os
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Dict, Any
-from utils import *
+from typing import Dict, Any, Callable
+from utils import is_successful_status, Backoff, Cache
 import time
 
 class Gallery:
@@ -16,7 +16,7 @@ class Gallery:
         self.page_size = page_size # Happy Accidents seems to default to 30 items per page
         self.lastResponse = None
 
-    def fetch_next_page(self) -> Dict[str, Any] | None:
+    def fetch_next_page(self) -> requests.Response:
         self.page += 1
         headers = {
             'Authorization': f'Bearer {self.authtoken}',
@@ -28,10 +28,10 @@ class Gallery:
         response = requests.get(fullurl, headers=headers)
         self.lastResponse = response
         if is_successful_status(response):
-            return response.json()
+            return response
         else:
             logging.error(f"Failed to fetch page {self.page} from {fullurl}; status code {response.status_code}")
-            return None
+            raise requests.exceptions.HTTPError(response)
 
 class Image:
     def __init__(self, image_data: Dict, inference_item_data: Dict, model_metadata: Dict|None, destination_dir: str):
@@ -107,7 +107,29 @@ class ModelMetadataManager:
             else:
                 logging.error(f"Failed to fetch model metadata for {model_id}")
                 return {}
-            
+
+def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backoff, description: str) -> requests.Response:
+    while True:
+        try:
+            start_time = time.time()
+            response = fetch_function()
+            end_time = time.time()
+            download_time = end_time - start_time
+            backoff.be_nice(download_time)
+            if not is_successful_status(response):
+                raise requests.exceptions.HTTPError(response)
+            if not response.text:
+                logging.warning(f"{description} fetch returned no data.")
+            return response
+        except requests.exceptions.HTTPError as e:
+            backoff.increment()
+            status_code = f", status code {e.response.status_code}" if hasattr(e.response, 'status_code') else ''
+            logging.warning(f"{description} request failed with HTTP error {e}{status_code}, retrying in {backoff.current} seconds...")
+        except requests.exceptions.RequestException as e:
+            backoff.increment()
+            logging.error(f"{description} request failed with error {e}, retrying in {backoff.current} seconds...")
+        time.sleep(backoff.current)
+
 class Downloader:
     def __init__(self, model_metadata_manager: ModelMetadataManager, max_backoff: float = 15, min_backoff : float = 0.5, ik_param: str|None = None):
         self.model_metadata_manager = model_metadata_manager
@@ -117,11 +139,11 @@ class Downloader:
     def download_image(self, image: Image):
         if os.path.exists(image.img_destination):
             logging.debug(f"Image already downloaded: {image.img_destination}")
-            # TODO temporary to update already downloaded images
-            image.save_metadata()
+            # Uncomment to update already downloaded images
+            # image.save_metadata()
             return
         else:
-            response = requests.get(image.url)
+            response = retry_fetch(lambda: requests.get(image.url), self.backoff, "Image")
             if is_successful_status(response):
                 with open(image.img_destination, 'wb') as file:
                     file.write(response.content)
@@ -131,25 +153,12 @@ class Downloader:
                 return
             else:
                 logging.error(f"Failed to download image from {image.url} with status code {response.status_code}")
-                raise requests.exceptions.HTTPError(response.text)
-
+                raise requests.exceptions.HTTPError(response)
+    
     def download_gallery(self, gallery: Gallery, destination_dir: str):
         while True: # getting more pages
-            while True: # fetching the next page
-                try:
-                    page_data = gallery.fetch_next_page()
-                    if not page_data:
-                        logging.error(f"Next gallery page fetch failed with no JSON returned; stopping download.")
-                        return
-                    break
-                except requests.exceptions.HTTPError as e:
-                    self.backoff.increment()
-                    logging.error(f"Gallery page request failed with error {e} and status code {e.response.status_code}, retrying in {self.backoff.current} seconds...")
-                except requests.exceptions.RequestException as e:
-                    self.backoff.increment()
-                    logging.error(f"Gallery page request failed with error {e}, retrying in {self.backoff.current} seconds...")
-                time.sleep(self.backoff.current)
-
+            page_data = retry_fetch(gallery.fetch_next_page, self.backoff, "Next gallery page").json()
+            self.backoff.reset()
             this_page_imagecount = 0
             for inference_data in page_data['items']:
                 for image_data in inference_data['images']:
@@ -163,27 +172,12 @@ class Downloader:
                         model_id = inference_data['inferencePayload']['modelId']
                         model_metadata = self.model_metadata_manager.fetch_model_metadata(model_id)
                     image = Image(image_data, inference_data, model_metadata, destination_dir)
-                    while True:
-                        try:
-                            start_time = time.time()
-                            self.download_image(image)
-                            end_time = time.time()
-                            download_time = end_time - start_time
-                            self.backoff.be_nice(download_time)
-                            break
-                        except requests.exceptions.HTTPError as e:
-                            self.backoff.increment()
-                            logging.error(f"Image request failed with error {e} and status code {e.response.status_code}, retrying in {self.backoff.current} seconds...")
-                        except requests.exceptions.RequestException as e:
-                            self.backoff.increment()
-                            logging.error(f"Image request failed with error {e}, retrying in {self.backoff.current} seconds...")
-                        time.sleep(self.backoff.current)
+                    self.download_image(image)
             
             # Extract pagination metadata
             pagination_metadata = page_data['paginationMetadata']
             if not pagination_metadata['hasNextPage']:
-                total_items = pagination_metadata.get('totalItems')
+                # total_items = pagination_metadata.get('totalItems') # doesn't seem to populate correctly
                 logging.info(f"Reached the end of the gallery. Total gallery pages: {gallery.page+1}") # page is 0-indexed
-                logging.info(f"Expected gallery items: {gallery.page*gallery.page_size + this_page_imagecount}")
+                logging.info(f"Expected total gallery size: {gallery.page*gallery.page_size + this_page_imagecount}")
                 return
-                

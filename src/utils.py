@@ -23,9 +23,10 @@ class Cache:
 
 class Backoff:
     def __init__(self, initial: float = 1.0, maxTime: float = 32, minTime: float = 0.5):
-        self.max = maxTime
-        self.min = minTime
-        self._current = min(max(initial, self.min), self.max)
+        self.maxTime = maxTime
+        self.minTime = minTime
+        self.initial = initial
+        self._current = min(max(initial, self.minTime), self.maxTime)
 
     @property
     def current(self):
@@ -33,7 +34,7 @@ class Backoff:
 
     @current.setter
     def current(self, value):
-        self._current = min(max(value, self.min), self.max)
+        self._current = min(max(value, self.minTime), self.maxTime)
 
     def increment(self):
         self.current *= 1.41421356  # 2.0^0.5
@@ -46,6 +47,9 @@ class Backoff:
             self.current = (download_time + self.current) / 2.0
         else:
             self.decrement()
+
+    def reset(self):
+        self.current = self.initial
 
 def is_successful_status(r: requests.Response) -> bool:
     return 200 <= r.status_code < 300

@@ -22,7 +22,7 @@ If the process is interrupted or more new images need to be archived, simply run
 
 The images will appear in your specified destination folder (by default, a new folder called 'output' under the working directory from which the script is running).
 
-To browse images, I recommend grouping by filetype and sorting by modified date.
+To browse images, I recommend grouping by filetype and sorting by the file's modified date (which will be set to the image's generation date).
 
 ## License
 
