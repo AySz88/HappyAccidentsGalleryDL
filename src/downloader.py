@@ -9,12 +9,13 @@ from utils import is_successful_status, Backoff, Cache
 import time
 
 class Gallery:
-    def __init__(self, url: str, authtoken: str, page_size: int = 30, start_page = 0):
+    def __init__(self, url: str, authtoken: str, page_size: int = 30, start_page = 0, request_timeout = 300.0):
         self.url = url
         self.authtoken = authtoken
         self.curpage = start_page-1 # Zero-indexed; incremented at the start of fetch_next_page
         self.page_size = page_size # Happy Accidents seems to default to 30 items per page
         self.lastResponse = None
+        self.request_timeout = request_timeout
 
     def fetch_next_page(self, backoff:Backoff) -> requests.Response:
         newpage = self.curpage + 1
@@ -25,7 +26,8 @@ class Gallery:
         }
         fullurl = f'{self.url}?current_page={newpage}&page_size={self.page_size}&has_images=true'
         logging.info(f"Fetching gallery page {newpage} from {fullurl}...")
-        response = retry_fetch(lambda: requests.get(fullurl, headers=clean_headers(headers)), backoff, "Next gallery page")
+        fetch_func = lambda: requests.get(fullurl, headers=clean_headers(headers), timeout=self.request_timeout)
+        response = retry_fetch(fetch_func, backoff, "Next gallery page")
         self.lastResponse = response
         self.curpage = newpage
         return response
@@ -144,25 +146,27 @@ def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backo
         retries += 1
 
 class Downloader:
-    def __init__(self, model_metadata_manager: ModelMetadataManager, 
-                 max_backoff: float = 15, min_backoff: float = 0.1, 
-                 ik_param: str|None = None, resave_metadata: bool = False):
+    def __init__(self, model_metadata_manager:ModelMetadataManager, 
+                 max_backoff:float = 15, min_backoff:float = 0.1, 
+                 ik_param:str|None = None, resave_metadata:bool = False,
+                 request_timeout:float = 60.0):
         self.model_metadata_manager = model_metadata_manager
         self.gallerybackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
         self.imgbackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
         self.ik_param = ik_param
-        self.resaveMetadata = resave_metadata
+        self.resave_metadata = resave_metadata
+        self.request_timeout = request_timeout
 
     def download_image(self, image: Image):
         if os.path.exists(image.img_destination):
             logging.debug(f"Image already downloaded: {image.img_destination}")
-            if self.resaveMetadata: image.save_metadata()
+            if self.resave_metadata: image.save_metadata()
             return
         else:
             if self.ik_param is not None:
-                request_func = lambda: requests.get(image.url, params={'tr': self.ik_param})
+                request_func = lambda: requests.get(image.url, params={'tr': self.ik_param}, timeout=self.request_timeout)
             else:
-                request_func = lambda: requests.get(image.url)    
+                request_func = lambda: requests.get(image.url, timeout=self.request_timeout)
             response = retry_fetch(request_func, self.imgbackoff, "Image")
             if is_successful_status(response):
                 with open(image.img_destination, 'wb') as file:
@@ -201,6 +205,7 @@ class Downloader:
             pagination_metadata = page_data['paginationMetadata']
             if not pagination_metadata['hasNextPage']:
                 # total_items = pagination_metadata.get('totalItems') # doesn't seem to populate correctly
-                logging.info(f"Reached the end of the gallery. Total gallery pages: {gallery.curpage+1}") # page is 0-indexed
-                logging.info(f"Expected total gallery size: {gallery.curpage*gallery.page_size + this_page_imagecount}")
+                total_items = gallery.curpage*gallery.page_size + this_page_imagecount
+                logging.info(f"Reached the end of the gallery. Total gallery pages: {gallery.curpage+1}") # curpage is 0-indexed
+                logging.info(f"Expected total gallery size: {total_items}")
                 return

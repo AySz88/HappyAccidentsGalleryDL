@@ -33,6 +33,8 @@ def main():
     imagekit_param = config.get("Output", "imagekit_param", fallback=None)
     max_backoff = config.getfloat("Network", "max_backoff")
     min_backoff = config.getfloat("Network", "min_backoff")
+    request_timeout = config.getfloat("Network", "request_timeout")
+    gallery_request_timeout = config.getfloat("Network", "gallery_request_timeout", fallback=request_timeout)
 
     # Configure logging
     logfile = f"{log_dir}{os.sep}{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
@@ -43,9 +45,22 @@ def main():
     logging.getLogger().addHandler(console_handler)
 
     # Initialize data structures
-    gallery = Gallery(url=gallery_url, authtoken=token, page_size=gallery_pagesize, start_page=gallery_startpage)
+    gallery = Gallery(
+        url=gallery_url,
+        authtoken=token,
+        page_size=gallery_pagesize,
+        start_page=gallery_startpage,
+        request_timeout=gallery_request_timeout
+    )
     modeldata = ModelMetadataManager(cache=Cache(model_cache_dir))
-    downloader = Downloader(model_metadata_manager=modeldata, max_backoff=max_backoff, min_backoff=min_backoff, ik_param=imagekit_param, resave_metadata=resave_meta)
+    downloader = Downloader(
+        model_metadata_manager=modeldata,
+        max_backoff=max_backoff,
+        min_backoff=min_backoff,
+        ik_param=imagekit_param,
+        resave_metadata=resave_meta,
+        request_timeout=request_timeout
+    )
 
     # Start downloading the images from the gallery
     downloader.download_gallery(gallery, destination_folder)
