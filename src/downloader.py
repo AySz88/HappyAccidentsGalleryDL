@@ -114,10 +114,11 @@ def clean_headers(headers: Dict[str, str]) -> Dict[str, str]:
             value.encode('latin-1')
             cleaned_headers[key] = value # don't double-encode
         except UnicodeEncodeError:
-            logging.warning(f"Skipping header {key}: {value}")
+            logging.warning(f"Skipping header due to encoding failure: {key}: {value}")
     return cleaned_headers
 
 def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backoff, description: str) -> requests.Response:
+    retries = 0
     while True:
         try:
             start_time = time.time()
@@ -129,6 +130,8 @@ def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backo
                 raise requests.exceptions.HTTPError(response)
             if not response.text:
                 logging.warning(f"{description} fetch returned no data.")
+            if retries:
+                logging.info(f"{description} request succeeded after {retries} retries.")
             return response
         except requests.exceptions.HTTPError as e:
             backoff.increment()
@@ -138,22 +141,29 @@ def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backo
             backoff.increment()
             logging.error(f"{description} request failed with error {e}, retrying in {backoff.current} seconds...")
         time.sleep(backoff.current)
+        retries += 1
 
 class Downloader:
-    def __init__(self, model_metadata_manager: ModelMetadataManager, max_backoff: float = 15, min_backoff : float = 0.1, ik_param: str|None = None):
+    def __init__(self, model_metadata_manager: ModelMetadataManager, 
+                 max_backoff: float = 15, min_backoff: float = 0.1, 
+                 ik_param: str|None = None, resave_metadata: bool = False):
         self.model_metadata_manager = model_metadata_manager
         self.gallerybackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
         self.imgbackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
-        self.ik_param = ik_param # NYI
+        self.ik_param = ik_param
+        self.resaveMetadata = resave_metadata
 
     def download_image(self, image: Image):
         if os.path.exists(image.img_destination):
             logging.debug(f"Image already downloaded: {image.img_destination}")
-            # Uncomment to update already downloaded images
-            # image.save_metadata()
+            if self.resaveMetadata: image.save_metadata()
             return
         else:
-            response = retry_fetch(lambda: requests.get(image.url), self.imgbackoff, "Image")
+            if self.ik_param is not None:
+                request_func = lambda: requests.get(image.url, params={'tr': self.ik_param})
+            else:
+                request_func = lambda: requests.get(image.url)    
+            response = retry_fetch(request_func, self.imgbackoff, "Image")
             if is_successful_status(response):
                 with open(image.img_destination, 'wb') as file:
                     file.write(response.content)
@@ -176,9 +186,12 @@ class Downloader:
                     if inference_data['inferenceType'] == 'UPSCALING':
                         model_metadata = None
                     else:
-                        # also fetch any lora metadata
+                        # also fetch any lora and embedding metadata
                         for lora_data in inference_data['inferencePayload']['lora']:
                             self.model_metadata_manager.fetch_model_metadata(lora_data['id'])
+                        if 'embeddingIds' in inference_data['inferencePayload']:
+                            for embedding_id in inference_data['inferencePayload']['embeddingIds']:
+                                self.model_metadata_manager.fetch_model_metadata(embedding_id)
                         model_id = inference_data['inferencePayload']['modelId']
                         model_metadata = self.model_metadata_manager.fetch_model_metadata(model_id)
                     image = Image(image_data, inference_data, model_metadata, destination_dir)

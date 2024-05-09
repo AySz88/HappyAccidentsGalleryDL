@@ -22,6 +22,7 @@ def main():
         else:
             print("Authorization token not found in config.ini or auth_token.txt")
             token = input("Paste it here and press Enter, or Ctrl-C to cancel: ")
+    resave_meta = config.getboolean("Output", "resave_metadata", fallback=False)
     destination_folder = config.get("Output", "download_dest")
     create_directory(destination_folder)
     model_cache_dir = config.get("Output", "model_metadata_dest")
@@ -29,7 +30,7 @@ def main():
     log_dir = config.get("Output", "log_dest")
     create_directory(log_dir)
     log_level = config.get("Logging", "log_level")
-    #imagekit_param = config.get("Output", "imagekit_param")
+    imagekit_param = config.get("Output", "imagekit_param", fallback=None)
     max_backoff = config.getfloat("Network", "max_backoff")
     min_backoff = config.getfloat("Network", "min_backoff")
 
@@ -44,7 +45,7 @@ def main():
     # Initialize data structures
     gallery = Gallery(url=gallery_url, authtoken=token, page_size=gallery_pagesize, start_page=gallery_startpage)
     modeldata = ModelMetadataManager(cache=Cache(model_cache_dir))
-    downloader = Downloader(model_metadata_manager=modeldata, max_backoff=max_backoff, min_backoff=min_backoff)#, ik_param = imagekit_param)
+    downloader = Downloader(model_metadata_manager=modeldata, max_backoff=max_backoff, min_backoff=min_backoff, ik_param=imagekit_param, resave_metadata=resave_meta)
 
     # Start downloading the images from the gallery
     downloader.download_gallery(gallery, destination_folder)
