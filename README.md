@@ -4,7 +4,7 @@ This Python project saves your (own) personal images from [Happy Accidents](http
 
 Due to time sensitivity, it strives to preserve data such that your activity and the gallery browsing experience could be reconstructed. However, it does not actually reconstruct such at the moment.
 
-The script has not been comprehensively tested. If you encounter [issues](/issues), assistance with resolving them would be appreciated, especially push requests.
+The script has not been comprehensively tested. If you encounter [issues](../../issues), assistance with resolving them would be appreciated, especially push requests.
 
 ## Prerequisites
 - Python 3.9 or similar (reported used on 3.9 through 3.12)
