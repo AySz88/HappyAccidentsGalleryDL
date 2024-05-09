@@ -13,7 +13,7 @@ The script has not been comprehensively tested. If you encounter [issues](/issue
 ## Usage
 1. Edit `config.ini` as desired, including output directories.
 2. Log into Happy Accidents and find your authorization token (process varies by browser). Save it in `config.ini` or to a new file `auth_token.txt`.
-    - For example, using Google Chrome (see [screenshot](/docs/auth%20token%20in%20devtools.png)):
+    - For example, using Google Chrome (see [screenshot](/doc/auth%20token%20in%20devtools.png)):
         1. Open DevTools
         2. Go to the Network panel
         3. Type into the filter box something like 'count', to bring up network requests for e.g. `https://easel-fgiw.onrender.com/v1/inferences/count`
