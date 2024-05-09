@@ -12,8 +12,18 @@ The script is not currently tested beyond the author's use case, and if you enco
 
 ## Usage
 1. Edit `config.ini` as desired, including output directories.
-2. Log into Happy Accidents and find your authorization token. For example: In Chrome, open DevTools, go to the Network panel, and type into the filter box something like 'count', to bring up network requests for e.g. `https://easel-fgiw.onrender.com/v1/inferences/count`. Click one, and in the sidebar that appears, under "Headers", under "Request Headers", find "Authorization". The token will be begin with the word "Bearer" followed by a long string - provide that long string, after the "Bearer" part. ([Screenshot](/docs/auth token in devtools.png))
-3. Run `src\main.py`.
+2. Log into Happy Accidents and find your authorization token. Save it in `config.ini` or to a new file `auth_token.txt`. For example, if using Google Chrome:
+    - Open DevTools
+    - Go to the Network panel
+    - Type into the filter box something like 'count', to bring up network requests for e.g. `https://easel-fgiw.onrender.com/v1/inferences/count`
+    - Click one of the requests
+    - In the sidebar that appears, under "Headers", under "Request Headers", find "Authorization"
+    - The token will begin with the word "Bearer" followed by a long string
+    - Provide that long string, after the "Bearer" part
+    - [Screenshot](/docs/auth token in devtools.png)
+3. In a terminal or command prompt, navigate to the project's root directory.
+4. Install the required Python packages by running `pip install -r requirements.txt`.
+5. Run `src\main.py`.
 
 The gallery listing has been observed to pause a minute or two after every 1000 images listed; this is presumed to be a server-side throttle.
 
