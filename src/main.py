@@ -6,12 +6,14 @@ import datetime
 import os
 
 def main():
+    print("Press Ctrl-C to stop at any time.")
     # Load configuration
     config = configparser.ConfigParser()
     config.read('config.ini')
 
     gallery_url = config.get("HappyAccidents", "gallery_url")
     gallery_pagesize = config.getint("HappyAccidents", "gallery_pagesize")
+    gallery_startpage = config.getint("HappyAccidents", "gallery_startpage", fallback=0)
     token = config.get("HappyAccidents", "auth_token", fallback=None)
     if not token:
         if os.path.exists("auth_token.txt"):
@@ -40,7 +42,7 @@ def main():
     logging.getLogger().addHandler(console_handler)
 
     # Initialize data structures
-    gallery = Gallery(url=gallery_url, authtoken=token, page_size=gallery_pagesize)
+    gallery = Gallery(url=gallery_url, authtoken=token, page_size=gallery_pagesize, start_page=gallery_startpage)
     modeldata = ModelMetadataManager(cache=Cache(model_cache_dir))
     downloader = Downloader(model_metadata_manager=modeldata, max_backoff=max_backoff, min_backoff=min_backoff)#, ik_param = imagekit_param)
 

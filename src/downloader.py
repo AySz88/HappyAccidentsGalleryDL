@@ -9,29 +9,26 @@ from utils import is_successful_status, Backoff, Cache
 import time
 
 class Gallery:
-    def __init__(self, url: str, authtoken: str, page_size: int = 30):
+    def __init__(self, url: str, authtoken: str, page_size: int = 30, start_page = 0):
         self.url = url
         self.authtoken = authtoken
-        self.page = -1 # First page will start at 0
+        self.curpage = start_page-1 # Zero-indexed; incremented at the start of fetch_next_page
         self.page_size = page_size # Happy Accidents seems to default to 30 items per page
         self.lastResponse = None
 
-    def fetch_next_page(self) -> requests.Response:
-        self.page += 1
+    def fetch_next_page(self, backoff:Backoff) -> requests.Response:
+        newpage = self.curpage + 1
         headers = {
             'Authorization': f'Bearer {self.authtoken}',
             'Origin': 'https://www.happyaccidents.ai',
             'Referer': 'https://www.happyaccidents.ai/'
         }
-        fullurl = f'{self.url}?current_page={self.page}&page_size={self.page_size}&has_images=true'
-        logging.info(f"Fetching gallery page {self.page} from {fullurl}...")
-        response = requests.get(fullurl, headers=headers)
+        fullurl = f'{self.url}?current_page={newpage}&page_size={self.page_size}&has_images=true'
+        logging.info(f"Fetching gallery page {newpage} from {fullurl}...")
+        response = retry_fetch(lambda: requests.get(fullurl, headers=clean_headers(headers)), backoff, "Next gallery page")
         self.lastResponse = response
-        if is_successful_status(response):
-            return response
-        else:
-            logging.error(f"Failed to fetch page {self.page} from {fullurl}; status code {response.status_code}")
-            raise requests.exceptions.HTTPError(response)
+        self.curpage = newpage
+        return response
 
 class Image:
     def __init__(self, image_data: Dict, inference_item_data: Dict, model_metadata: Dict|None, destination_dir: str):
@@ -108,6 +105,18 @@ class ModelMetadataManager:
                 logging.error(f"Failed to fetch model metadata for {model_id}")
                 return {}
 
+# Check whether keys and values can be encoded to 'latin-1' encoding, and keep only those that can
+def clean_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    cleaned_headers: Dict[str, str] = {}
+    for key, value in headers.items():
+        try:
+            key.encode('latin-1')
+            value.encode('latin-1')
+            cleaned_headers[key] = value # don't double-encode
+        except UnicodeEncodeError:
+            logging.warning(f"Skipping header {key}: {value}")
+    return cleaned_headers
+
 def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backoff, description: str) -> requests.Response:
     while True:
         try:
@@ -131,9 +140,10 @@ def retry_fetch(fetch_function: Callable[..., requests.Response], backoff: Backo
         time.sleep(backoff.current)
 
 class Downloader:
-    def __init__(self, model_metadata_manager: ModelMetadataManager, max_backoff: float = 15, min_backoff : float = 0.5, ik_param: str|None = None):
+    def __init__(self, model_metadata_manager: ModelMetadataManager, max_backoff: float = 15, min_backoff : float = 0.1, ik_param: str|None = None):
         self.model_metadata_manager = model_metadata_manager
-        self.backoff = Backoff()
+        self.gallerybackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
+        self.imgbackoff = Backoff(maxTime=max_backoff, minTime=min_backoff)
         self.ik_param = ik_param # NYI
 
     def download_image(self, image: Image):
@@ -143,7 +153,7 @@ class Downloader:
             # image.save_metadata()
             return
         else:
-            response = retry_fetch(lambda: requests.get(image.url), self.backoff, "Image")
+            response = retry_fetch(lambda: requests.get(image.url), self.imgbackoff, "Image")
             if is_successful_status(response):
                 with open(image.img_destination, 'wb') as file:
                     file.write(response.content)
@@ -156,9 +166,9 @@ class Downloader:
                 raise requests.exceptions.HTTPError(response)
     
     def download_gallery(self, gallery: Gallery, destination_dir: str):
+        self.gallerybackoff.reset()
         while True: # getting more pages
-            page_data = retry_fetch(gallery.fetch_next_page, self.backoff, "Next gallery page").json()
-            self.backoff.reset()
+            page_data = gallery.fetch_next_page(self.gallerybackoff).json()
             this_page_imagecount = 0
             for inference_data in page_data['items']:
                 for image_data in inference_data['images']:
@@ -178,6 +188,6 @@ class Downloader:
             pagination_metadata = page_data['paginationMetadata']
             if not pagination_metadata['hasNextPage']:
                 # total_items = pagination_metadata.get('totalItems') # doesn't seem to populate correctly
-                logging.info(f"Reached the end of the gallery. Total gallery pages: {gallery.page+1}") # page is 0-indexed
-                logging.info(f"Expected total gallery size: {gallery.page*gallery.page_size + this_page_imagecount}")
+                logging.info(f"Reached the end of the gallery. Total gallery pages: {gallery.curpage+1}") # page is 0-indexed
+                logging.info(f"Expected total gallery size: {gallery.curpage*gallery.page_size + this_page_imagecount}")
                 return
